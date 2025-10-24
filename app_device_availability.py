@@ -689,7 +689,7 @@ if st.session_state.search_completed:
                 else:
                     # Mostrar dropdown con locations existentes
                     location_options = {
-                        f"📍 {loc['name']} ({loc['device_count']} devices)": loc['id'] 
+                        f"📍 {loc['name']} ": loc['id'] 
                         for loc in in_house_locations
                     }
                     

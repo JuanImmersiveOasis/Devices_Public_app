@@ -24,7 +24,7 @@ st.markdown("Consulta qué dispositivos están disponibles para alquilar en un r
 st.markdown("---")
 
 # Configuración de Notion
-NOTION_TOKEN = st.secrets("NOTION_TOKEN")
+NOTION_TOKEN = st.secrets["NOTION_TOKEN"]
 NOTION_VERSION = "2022-06-28"
 DEVICES_ID = "43e15b677c8c4bd599d7c602f281f1da"
 LOCATIONS_ID = "28758a35e4118045abe6e37534c44974"

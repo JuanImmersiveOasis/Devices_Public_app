@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 from datetime import datetime, date
-import streamlit as st
 
 
 # Configuración de la página
@@ -23,9 +22,6 @@ with title_col:
 
 st.markdown("Consulta qué dispositivos están disponibles para alquilar en un rango de fechas")
 st.markdown("---")
-
-# Cargar variables de entorno desde el archivo .env
-load_dotenv()
 
 # Configuración de Notion
 NOTION_TOKEN = st.secrets("NOTION_TOKEN")

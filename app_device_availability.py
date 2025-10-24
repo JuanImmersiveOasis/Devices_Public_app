@@ -1,8 +1,7 @@
 import streamlit as st
 import requests
 from datetime import datetime, date
-import os
-from dotenv import load_dotenv
+import streamlit as st
 
 
 # Configuración de la página
@@ -29,7 +28,7 @@ st.markdown("---")
 load_dotenv()
 
 # Configuración de Notion
-NOTION_TOKEN = os.getenv("NOTION_TOKEN")
+NOTION_TOKEN = st.secrets("NOTION_TOKEN")
 NOTION_VERSION = "2022-06-28"
 DEVICES_ID = "43e15b677c8c4bd599d7c602f281f1da"
 LOCATIONS_ID = "28758a35e4118045abe6e37534c44974"

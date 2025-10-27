@@ -1,12 +1,15 @@
 import streamlit as st
 import requests
 from datetime import datetime, date
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 
 # Configuración de la página
 st.set_page_config(
     page_title="Disponibilidad de dispositivos",
-    page_icon="",
+    page_icon="img/icono.png",
     layout="centered"
 )
 
@@ -35,7 +38,6 @@ except:
     if not NOTION_TOKEN:
         st.error("❌ No se encontró NOTION_TOKEN. Configura st.secrets o el archivo .env")
         st.stop()
-
 NOTION_VERSION = "2022-06-28"
 DEVICES_ID = "43e15b677c8c4bd599d7c602f281f1da"
 LOCATIONS_ID = "28758a35e4118045abe6e37534c44974"
@@ -66,7 +68,7 @@ def extract_device_data(page):
     # Extraer ID de la página
     device_data["id"] = page["id"]
     
-    # Extraer Name
+    # Extraer Name (nombre del dispositivo)
     try:
         if props.get("Name") and props["Name"]["title"]:
             device_data["Name"] = props["Name"]["title"][0]["text"]["content"]
@@ -75,7 +77,7 @@ def extract_device_data(page):
     except:
         device_data["Name"] = "Sin nombre"
     
-    # Extraer Tags (campo SELECT, no multi_select)
+    # Extraer Tags (etiqueta del dispositivo, como "Ultra" o "Neo 4")
     try:
         if props.get("Tags") and props["Tags"]["select"]:
             device_data["Tags"] = props["Tags"]["select"]["name"]
@@ -84,7 +86,7 @@ def extract_device_data(page):
     except:
         device_data["Tags"] = "Sin tag"
     
-    # Extraer Locations_demo
+    # Extraer Locations_demo (contador de ubicaciones asignadas)
     try:
         if props.get("Location") and props["Location"]["relation"]:
             location_ids = [rel["id"] for rel in props["Location"]["relation"]]
@@ -94,7 +96,7 @@ def extract_device_data(page):
     except:
         device_data["Locations_demo_count"] = 0
     
-    # Extraer Start Date
+    # Extraer Start Date (fecha de inicio de la reserva)
     try:
         if props.get("Start Date") and props["Start Date"]["rollup"]:
             rollup = props["Start Date"]["rollup"]
@@ -113,7 +115,7 @@ def extract_device_data(page):
     except:
         device_data["Start Date"] = None
     
-    # Extraer End Date
+    # Extraer End Date (fecha de fin de la reserva)
     try:
         if props.get("End Date") and props["End Date"]["rollup"]:
             rollup = props["End Date"]["rollup"]
@@ -136,21 +138,21 @@ def extract_device_data(page):
 
 
 def check_availability(device, start_date, end_date):
-    """Verifica si un dispositivo está disponible en el rango de fechas"""
+    """Verifica si un dispositivo está disponible en el rango de fechas solicitado"""
     
-    # Sin ubicación = disponible
+    # Si no tiene ubicación = está disponible
     if device["Locations_demo_count"] == 0:
         return True
     
-    # Tiene ubicación, verificar fechas
+    # Si tiene ubicación, verificar las fechas
     device_start = device["Start Date"]
     device_end = device["End Date"]
     
-    # Con ubicación pero sin fechas = ocupado indefinidamente
+    # Si tiene ubicación pero sin fechas = ocupado indefinidamente
     if device_start is None and device_end is None:
         return False
     
-    # Convertir strings a objetos date
+    # Convertir strings de fechas a objetos date para compararlos
     try:
         if device_start:
             device_start_date = datetime.fromisoformat(device_start).date()
@@ -164,7 +166,7 @@ def check_availability(device, start_date, end_date):
     except:
         return False
     
-    # Verificar solapamiento
+    # Verificar si hay solapamiento de fechas
     if device_start_date and device_end_date:
         if (start_date <= device_end_date and end_date >= device_start_date):
             return False
@@ -187,7 +189,7 @@ def check_availability(device, start_date, end_date):
 
 
 def get_in_house_locations():
-    """Obtiene locations de tipo In House (SIN contador de devices)"""
+    """Obtiene locations de tipo In House desde Notion"""
     url = f"https://api.notion.com/v1/databases/{LOCATIONS_ID}/query"
     
     payload = {
@@ -207,7 +209,7 @@ def get_in_house_locations():
     for page in data.get("results", []):
         props = page["properties"]
         
-        # Extraer Name
+        # Extraer Name (nombre de la ubicación)
         try:
             if props.get("Name") and props["Name"]["title"]:
                 name = props["Name"]["title"][0]["text"]["content"]
@@ -216,13 +218,66 @@ def get_in_house_locations():
         except:
             name = "Sin nombre"
         
-        # Solo guardamos id y name (SIN device_count)
+        # Extraer Units (número de dispositivos)
+        try:
+            if props.get("Units") and props["Units"]["number"] is not None:
+                device_count = props["Units"]["number"]
+            else:
+                device_count = 0
+        except:
+            device_count = 0
+        
+        locations.append({
+            "id": page["id"],
+            "name": name,
+            "device_count": device_count
+        })
+    
+    return locations
+
+
+# ====================================================
+# 🔹 NUEVA FUNCIÓN: Obtener locations tipo Client
+# ====================================================
+def get_client_locations():
+    """Obtiene locations de tipo Client desde Notion"""
+    url = f"https://api.notion.com/v1/databases/{LOCATIONS_ID}/query"
+    
+    # Filtramos solo las locations de tipo "Client"
+    payload = {
+        "filter": {
+            "property": "Type",
+            "select": {
+                "equals": "Client"
+            }
+        },
+        "page_size": 100
+    }
+    
+    response = requests.post(url, json=payload, headers=headers)
+    data = response.json()
+    
+    locations = []
+    for page in data.get("results", []):
+        props = page["properties"]
+        
+        # Extraer Name (nombre del cliente/destino)
+        try:
+            if props.get("Name") and props["Name"]["title"]:
+                name = props["Name"]["title"][0]["text"]["content"]
+            else:
+                name = "Sin nombre"
+        except:
+            name = "Sin nombre"
+        
+        # Guardar solo id y nombre (sin device_count)
         locations.append({
             "id": page["id"],
             "name": name
         })
     
     return locations
+# ====================================================
 
 
 def create_in_house_location(name, start_date):
@@ -368,6 +423,64 @@ def assign_devices_client(device_names, client_name, start_date, end_date, avail
         return False
 
 
+# ====================================================
+# 🔹 NUEVA FUNCIÓN: Asignar a location Client existente
+# ====================================================
+def assign_devices_to_existing_client(device_names, location_id, location_name, available_devices):
+    """Asigna dispositivos a una location Client existente"""
+    
+    success_count = 0
+    url_patch = "https://api.notion.com/v1/pages/"
+    
+    progress_bar = st.progress(0)
+    total = len(device_names)
+    
+    for idx, device_name in enumerate(device_names):
+        # Buscar el device_id en available_devices
+        device_id = None
+        for device in available_devices:
+            if device["Name"] == device_name:
+                device_id = device["id"]
+                break
+        
+        if not device_id:
+            st.warning(f"⚠️ No se encontró el ID para '{device_name}'")
+            continue
+        
+        # Asignar el dispositivo a la location existente
+        payload_device = {
+            "properties": {
+                "Location": {
+                    "relation": [
+                        {"id": location_id}
+                    ]
+                }
+            }
+        }
+        
+        response_device = requests.patch(f"{url_patch}{device_id}", json=payload_device, headers=headers)
+        
+        if response_device.status_code == 200:
+            success_count += 1
+        else:
+            st.warning(f"⚠️ Error al asignar '{device_name}': {response_device.text}")
+        
+        progress_bar.progress((idx + 1) / total)
+    
+    progress_bar.empty()
+    
+    if success_count == len(device_names):
+        st.success(f"🎉 ¡Perfecto! {success_count} dispositivos asignados a '{location_name}'")
+        return True
+    elif success_count > 0:
+        st.warning(f"⚠️ Se asignaron {success_count} de {len(device_names)} dispositivos")
+        return True
+    else:
+        st.error("❌ No se pudo asignar ningún dispositivo")
+        return False
+# ====================================================
+
+
 def assign_devices_in_house(device_names, location_id, location_name, start_date, available_devices):
     """Asigna dispositivos a una ubicación In House existente"""
     
@@ -421,7 +534,7 @@ def assign_devices_in_house(device_names, location_id, location_name, start_date
         return False
 
 
-# Inicializar estado de sesión
+# Inicializar estado de sesión (para mantener datos entre clics)
 if 'selected_devices' not in st.session_state:
     st.session_state.selected_devices = []
 
@@ -438,7 +551,7 @@ if 'query_end_date' not in st.session_state:
     st.session_state.query_end_date = date.today()
 
 
-# Interfaz de fechas
+# Interfaz de fechas (selector de inicio y fin)
 col1, col2 = st.columns(2)
 
 with col1:
@@ -455,7 +568,7 @@ with col2:
         format="DD/MM/YYYY"
     )
 
-# Validación de fechas
+# Validación de fechas (inicio no puede ser después del fin)
 if start_date > end_date:
     st.error("⚠️ La fecha de inicio no puede ser posterior a la fecha de fin")
     st.stop()
@@ -463,11 +576,11 @@ if start_date > end_date:
 # Botón de búsqueda
 if st.button("🔍 Consultar Disponibilidad", type="primary", use_container_width=True):
     with st.spinner("Consultando dispositivos..."):
-        # Obtener todos los devices
+        # Obtener todos los devices de Notion
         pages = get_pages(DEVICES_ID)
         all_devices = [extract_device_data(page) for page in pages]
         
-        # Filtrar disponibles
+        # Filtrar solo los disponibles
         available_devices = [
             device for device in all_devices 
             if check_availability(device, start_date, end_date)
@@ -487,7 +600,7 @@ if st.session_state.search_completed:
     if available_devices:
         st.success(f"✅ Hay {len(available_devices)} dispositivos disponibles")
         
-        # Obtener tags únicos (select, no multi_select)
+        # Obtener tags únicos para el filtro
         unique_tags = set()
         for device in available_devices:
             if device["Tags"] and device["Tags"] != "Sin tag":
@@ -504,7 +617,7 @@ if st.session_state.search_completed:
             index=0
         )
         
-        # Aplicar filtro (comparación directa)
+        # Aplicar filtro
         if selected_tag == "Todos":
             filtered_devices = available_devices
         else:
@@ -514,14 +627,13 @@ if st.session_state.search_completed:
         if selected_tag != "Todos":
             st.info(f"📊 Mostrando {len(filtered_devices)} dispositivos con etiqueta '{selected_tag}'")
         
-        # Ordenar alfabéticamente los dispositivos filtrados
+        # Ordenar alfabéticamente
         available_devices_sorted = sorted(filtered_devices, key=lambda d: d["Name"])
         
         # Selector de dispositivos con checkboxes
         st.markdown("---")
         st.subheader("Selecciona los dispositivos que quieres asignar")
         
-        # Mostrar los dispositivos ordenados y filtrados
         for device in available_devices_sorted:
             device_name = device["Name"]
             
@@ -529,7 +641,7 @@ if st.session_state.search_completed:
             inner_col1, inner_col2 = st.columns([0.5, 9.5])
             
             with inner_col1:
-                # Checkbox
+                # Checkbox para seleccionar
                 checkbox_value = st.checkbox(
                     "",
                     value=device_name in st.session_state.selected_devices,
@@ -544,7 +656,7 @@ if st.session_state.search_completed:
                     st.session_state.selected_devices.remove(device_name)
             
             with inner_col2:
-                # Solo mostrar el nombre (sin tags)
+                # Mostrar solo el nombre (sin tags)
                 st.markdown(
                     f"""
                     <div style='padding: 8px 12px; 
@@ -560,7 +672,6 @@ if st.session_state.search_completed:
                     unsafe_allow_html=True
                 )
             
-            # Espacio entre dispositivos
             st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
         
         # Mostrar formulario de asignación si hay dispositivos seleccionados
@@ -568,7 +679,7 @@ if st.session_state.search_completed:
             st.markdown("---")
             st.subheader(f"🎯 Asignar ubicación ({len(st.session_state.selected_devices)} dispositivos)")
             
-            # Selector de tipo de ubicación - DESPLEGABLE
+            # Selector de tipo de ubicación
             location_type = st.selectbox(
                 "Tipo de Ubicación",
                 ["Client", "In House"],
@@ -590,18 +701,20 @@ if st.session_state.search_completed:
             
             st.markdown("---")
             
-            # Formulario según el tipo
+            # ====================================================
+            # FORMULARIO CLIENT (SOLO CREACIÓN DIRECTA)
+            # ====================================================
             if location_type == "Client":
-                # FORMULARIO CLIENT
                 st.write("**📋 Nuevo Destino Cliente**")
                 
+                # Solo opción de crear nuevo (sin radio buttons ni dropdown)
                 client_name = st.text_input(
                     "Nombre del Destino",
                     placeholder="Ej: Destino Barcelona 2025",
                     key="client_name_input"
                 )
                 
-                if st.button("Asignar", type="primary", use_container_width=True):
+                if st.button("Crear y Asignar", type="primary", use_container_width=True):
                     query_start = st.session_state.query_start_date
                     query_end = st.session_state.query_end_date
                     
@@ -618,9 +731,10 @@ if st.session_state.search_completed:
                         st.session_state.search_completed = False
                         st.session_state.available_devices = []
                         st.rerun()
+            # ====================================================
             
             else:
-                # FORMULARIO IN HOUSE
+                # FORMULARIO IN HOUSE (sin cambios)
                 st.write("**🏠 Asignar a In House**")
                 
                 # Obtener locations In House
@@ -631,7 +745,6 @@ if st.session_state.search_completed:
                     st.warning("⚠️ No hay ubicaciones In House disponibles")
                     st.info("💡 Crea una nueva ubicación In House")
                     
-                    # Formulario para crear nueva
                     new_in_house_name = st.text_input(
                         "Nombre de la ubicación",
                         placeholder="Ej: Casa Juan",
@@ -662,7 +775,7 @@ if st.session_state.search_completed:
                                     st.rerun()
                 
                 else:
-                    # Mostrar dropdown con locations existentes (SIN device_count)
+                    # Mostrar dropdown con locations existentes (SIN mostrar device_count)
                     location_options = {
                         f"📍 {loc['name']}": loc['id'] 
                         for loc in in_house_locations

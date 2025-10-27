@@ -24,7 +24,18 @@ st.markdown("Consulta qué dispositivos están disponibles para alquilar en un r
 st.markdown("---")
 
 # Configuración de Notion
-NOTION_TOKEN = st.secrets["NOTION_TOKEN"]
+try:
+    NOTION_TOKEN = st.secrets["NOTION_TOKEN"]
+except:
+    # Opción 2: Usar variables de entorno (para desarrollo local con .env)
+    # Si falla st.secrets, intenta leer de variables de entorno
+    import os
+    NOTION_TOKEN = os.getenv("NOTION_TOKEN")
+    
+    if not NOTION_TOKEN:
+        st.error("❌ No se encontró NOTION_TOKEN. Configura st.secrets o el archivo .env")
+        st.stop()
+
 NOTION_VERSION = "2022-06-28"
 DEVICES_ID = "43e15b677c8c4bd599d7c602f281f1da"
 LOCATIONS_ID = "28758a35e4118045abe6e37534c44974"
@@ -64,20 +75,14 @@ def extract_device_data(page):
     except:
         device_data["Name"] = "Sin nombre"
     
-    # ========================================
-    # 🔹 CORREGIDO: Extraer Tags (campo SELECT, no multi_select)
-    # ========================================
-    # Tags es un campo "select" que contiene UN SOLO VALOR
-    # Ejemplo: "Ultra" o "Neo 4"
+    # Extraer Tags (campo SELECT, no multi_select)
     try:
         if props.get("Tags") and props["Tags"]["select"]:
-            # Extraemos el nombre del tag seleccionado
             device_data["Tags"] = props["Tags"]["select"]["name"]
         else:
             device_data["Tags"] = "Sin tag"
     except:
         device_data["Tags"] = "Sin tag"
-    # ========================================
     
     # Extraer Locations_demo
     try:
@@ -182,7 +187,7 @@ def check_availability(device, start_date, end_date):
 
 
 def get_in_house_locations():
-    """Obtiene locations de tipo In House con contador de devices desde campo Units"""
+    """Obtiene locations de tipo In House (SIN contador de devices)"""
     url = f"https://api.notion.com/v1/databases/{LOCATIONS_ID}/query"
     
     payload = {
@@ -211,19 +216,10 @@ def get_in_house_locations():
         except:
             name = "Sin nombre"
         
-        # Extraer Units como device_count
-        try:
-            if props.get("Units") and props["Units"]["number"] is not None:
-                device_count = props["Units"]["number"]
-            else:
-                device_count = 0
-        except:
-            device_count = 0
-        
+        # Solo guardamos id y name (SIN device_count)
         locations.append({
             "id": page["id"],
-            "name": name,
-            "device_count": device_count
+            "name": name
         })
     
     return locations
@@ -342,7 +338,7 @@ def assign_devices_client(device_names, client_name, start_date, end_date, avail
         
         payload_device = {
             "properties": {
-                "Location": {   # Cambiado de 📍 Locations_demo
+                "Location": {
                     "relation": [
                         {"id": location_id}
                     ]
@@ -395,7 +391,7 @@ def assign_devices_in_house(device_names, location_id, location_name, start_date
         
         payload_device = {
             "properties": {
-                "Location": {   # Cambiado de 📍 Locations_demo
+                "Location": {
                     "relation": [
                         {"id": location_id}
                     ]
@@ -491,46 +487,28 @@ if st.session_state.search_completed:
     if available_devices:
         st.success(f"✅ Hay {len(available_devices)} dispositivos disponibles")
         
-        # ========================================
-        # 🔹 CORREGIDO: Obtener tags únicos (select, no multi_select)
-        # ========================================
-        # Como Tags es un campo "select" con un solo valor por dispositivo,
-        # simplemente recopilamos todos los valores únicos
-        
-        unique_tags = set()  # Set para evitar duplicados
+        # Obtener tags únicos (select, no multi_select)
+        unique_tags = set()
         for device in available_devices:
-            # Cada dispositivo tiene un solo tag (string)
             if device["Tags"] and device["Tags"] != "Sin tag":
                 unique_tags.add(device["Tags"])
         
-        # Convertir a lista ordenada
         unique_tags = sorted(unique_tags)
-        
-        # Añadir "Todos" como primera opción
         filter_options = ["Todos"] + unique_tags
-        # ========================================
         
-        # ========================================
-        # 🔹 Selector de filtro por Tag
-        # ========================================
+        # Selector de filtro por Tag
         st.markdown("---")
         selected_tag = st.selectbox(
-            "🔍 Filtrar por etiqueta",
+            "🔎 Filtrar por etiqueta",
             options=filter_options,
-            index=0  # "Todos" seleccionado por defecto
+            index=0
         )
-        # ========================================
         
-        # ========================================
-        # 🔹 CORREGIDO: Aplicar filtro (comparación directa)
-        # ========================================
-        # Ahora comparamos directamente el string del tag
+        # Aplicar filtro (comparación directa)
         if selected_tag == "Todos":
             filtered_devices = available_devices
         else:
-            # Filtramos: un dispositivo se incluye si su tag coincide exactamente
             filtered_devices = [d for d in available_devices if d["Tags"] == selected_tag]
-        # ========================================
         
         # Mostrar contador de dispositivos filtrados
         if selected_tag != "Todos":
@@ -594,10 +572,8 @@ if st.session_state.search_completed:
             location_type = st.selectbox(
                 "Tipo de Ubicación",
                 ["Client", "In House"],
-                index=0  # Client por defecto
+                index=0
             )
-            
-        
             
             # Información de dispositivos seleccionados
             selected_list = ", ".join(st.session_state.selected_devices)
@@ -629,7 +605,6 @@ if st.session_state.search_completed:
                     query_start = st.session_state.query_start_date
                     query_end = st.session_state.query_end_date
                     
-                    # Usamos available_devices original (lista completa)
                     success = assign_devices_client(
                         st.session_state.selected_devices,
                         client_name,
@@ -687,9 +662,9 @@ if st.session_state.search_completed:
                                     st.rerun()
                 
                 else:
-                    # Mostrar dropdown con locations existentes
+                    # Mostrar dropdown con locations existentes (SIN device_count)
                     location_options = {
-                        f"📍 {loc['name']} ({loc['device_count']} devices)": loc['id'] 
+                        f"📍 {loc['name']}": loc['id'] 
                         for loc in in_house_locations
                     }
                     
@@ -699,7 +674,7 @@ if st.session_state.search_completed:
                     )
                     
                     selected_location_id = location_options[selected_location_display]
-                    selected_location_name = selected_location_display.split(" (")[0].replace("📍 ", "")
+                    selected_location_name = selected_location_display.replace("📍 ", "")
                     
                     # Opción para crear nueva
                     with st.expander("➕ O crear nueva ubicación In House"):
